@@ -42,6 +42,8 @@ import {createSVGWidget} from './svgWidget.js'
 import GtexUtils from "./gtexUtils.js"
 import version from "./version.js"
 import {createCircularViewResizeModal} from "./circularViewResizeModal.js"
+//EDITED:
+import { Sonification } from "./sonification.js";
 
 $(document).ready(async () => main(document.getElementById('igv-app-container'), igvwebConfig))
 
@@ -108,8 +110,17 @@ async function main(container, config) {
 
     const browser = await igv.createBrowser(container, igvConfig)
 
+    //EDITED: Add the browser to the window variables
+    window.browser = browser
+    //EDITED: Create a Sonification Object
+    Globals.sonifier = new Sonification(browser, config)
+
     if (browser) {
         Globals.browser = browser
+        
+        //EDITED: Add the event listener to locus change
+        //browser.on('locuschange', (referenceFrameList) => console.log(referenceFrameList[0]['start'], referenceFrameList[0]['end']))
+        
         await initializationHelper(browser, container, config)
     }
 }
@@ -313,7 +324,6 @@ async function initializationHelper(browser, container, options) {
 
     EventBus.globalBus.post({type: "DidChangeGenome", data: browser.genome.id})
 }
-
 
 function queryGoogleAuthenticationStatus(user, isSignedIn) {
 
