@@ -128,10 +128,12 @@ export class Sonification {
         }
 
         rightContainer.classList.add("sonification-bottom-container");
-        for(var j = 0; j < this.available_sonifications.length; j++) {
             
-            var name = this.available_sonifications[j]["name"];
-            
+        for(let sonification of this.available_sonifications) {
+
+            var type = sonification["type"]
+            var name = sonification["formatted_name"];
+
             var sonification_column = document.createElement("div")
             sonification_column.classList.add("sonification-column")
             sonification_column.setAttribute("id", `${name}-column`)
@@ -140,7 +142,7 @@ export class Sonification {
             var btn = document.createElement("button")
             btn.classList.add("sonification-button");
             btn.setAttribute("id", `${name}-btn`);
-            btn.innerHTML = name;
+            btn.innerHTML = type;
             btn.onclick = (e) => {
                 var checkboxes = document.getElementsByClassName("signal-checkbox");
                 var selected_signals = [];
@@ -152,29 +154,41 @@ export class Sonification {
                 var selected_btn = e.target
                 var selected_sonification = {
                     "type": selected_btn.innerHTML,
+                    "formatted_name": selected_btn.id.slice(0, -4),
                     "signals": selected_signals,
                     "locus": [this.browser.referenceFrameList[0]['start'], this.browser.referenceFrameList[0]['end']],
-                    "duration": 15,
-                    "id": this.sonificationID
+                    "id": this.sonificationID,
+                    "params": sonification["init_params"],
                 }
-                console.log(selected_sonification)
+                //console.log(selected_sonification)
                 this.sonificationID++;
                 this.playSonification(selected_sonification)
             };
             sonification_column.appendChild(btn)
 
-
             var sonification_controller = document.createElement("div")
             sonification_controller.classList.add("sonification-controller")
             sonification_controller.setAttribute("id", `${name}-controller`)
-            this.createController(sonification_controller, name)
+            this.createController(sonification_controller, name, sonification["init_params"])
             sonification_column.appendChild(sonification_controller)
             
         }
     }
 
-    sliderFactory(parentDiv, parent_name, slider_name, min, max, step, value) {
-        
+    createController(sonification_controller, sonification_name, params) {     
+        for(let param of params) {
+            this.sliderFactory(sonification_controller, sonification_name, param);
+        }
+    }
+
+    sliderFactory(parentDiv, parent_name, config) {
+
+        var slider_name = config["name"]
+        var min = config["min"]
+        var max = config["max"]
+        var step = config["step"]
+        var value = config["value"]
+
         var slider_container = document.createElement("div");
         slider_container.classList.add("slider-container");
         parentDiv.appendChild(slider_container);
@@ -201,36 +215,117 @@ export class Sonification {
         slider_container.appendChild(slider);
     }
 
-    createController(sonification_controller, name) {
-        
-        // RAW DATA SONIFICATION CONTROLLER
-        if(name === "Raw Data Sonification") {
-            var parent_name = "raw-data-sonification";
-            this.sliderFactory(sonification_controller, parent_name, "Volume", 0, 10, 0.5, 5);
-            this.sliderFactory(sonification_controller, parent_name, "Frequency", 50, 500, 1, 250)
-            this.sliderFactory(sonification_controller, parent_name, "Duration", 1, 30, 1, 15)
+    playSonification(sonification) {
+
+        // REQUIRED SONIFICATION
+        var type = sonification["type"]
+        var name = sonification["formatted_name"];
+        var signals = sonification["signals"]
+        var start = sonification["locus"][0] / 1000;
+        var end = sonification["locus"][1] / 1000;
+        var id = sonification["id"]
+        var params = sonification["params"]
+
+        if(signals.length === 0) {
+            console.log("No signals to play")
+            return
         }
+        
+        // RETRIEVE CONTROL PARAMETERS
+
+        var params_dict = {}
+        for (let param of params) {
+            var slider_name = param["name"]
+            var slider = document.getElementById(`${name}-${slider_name}-slider`)
+            var value = Number(slider.value)
+            params_dict[slider_name] = value        
+        }
+
+        //console.log(params_dict)
+
+        // RETRIEVE AND TRIM THE SIGNALS TO SONIFY
+        var signal_data = []
+        for(let signal of signals) {
+            for(var i = 0; i < this.signals.length; i++) {
+                if(this.signals[i]["name"] === signal) {
+                    console.log(this.signals[i]["binary_data"])
+                    var trimmed_signal = this.signals[i]["binary_data"].slice(Math.floor(start), Math.floor(end))
+                    console.log(start, end)
+                    signal_data.push(trimmed_signal)
+                }
+            }
+        }
+
+        var duration = 15;
+        this.launchTimeCursor(id, duration)
+        //console.log(signal_data)
+        this.playRawData(signal_data, params_dict, id, duration)
     }
-    
-    rawDataSonification(time) {
-        const oscillator = this.audioCtx.createOscillator();
-        oscillator.type = 'square';
-        oscillator.frequency.setValueAtTime(440, this.audioCtx.currentTime);
-        oscillator.connect(this.audioCtx.destination);
-        oscillator.start(time);
-        oscillator.stop(time + 1);
 
-        let attackTime = 0.2;
-        const attackControl = document.querySelector('#attack');
-        attackControl.addEventListener('input', function() {
-            attackTime = Number(this.value);
-        }, false);
+    playRawData(signals, params_dict, id, duration) {
 
-        let releaseTime = 0.5;
-        const releaseControl = document.querySelector('#release');
-        releaseControl.addEventListener('input', function() {
-            releaseTime = Number(this.value);
-        }, false);
+        // RESUME THE AUDIO CONTEXT
+        if (this.audioCtx.state === 'suspended') {
+            this.audioCtx.resume();
+        }
+
+        // CREATE BUFFERS
+        var num_channels = signals.length;
+        var buffer_length = signals[0].length;
+        
+        // var buffer_sampleRate = Math.max(8000, buffer_length/params_dict["Duration"]);
+
+        var buffer_sampleRate = Math.max(8000, buffer_length/duration);
+
+        
+        var buffer = this.audioCtx.createBuffer(num_channels, buffer_length, buffer_sampleRate);
+        for(var i = 0; i < num_channels; i++) {
+            var channel = buffer.getChannelData(i);
+            for(var j = 0; j < buffer_length; j++) {
+                channel[j] = signals[i][j]
+            }
+        }
+        
+        console.log(buffer_sampleRate, buffer_length, num_channels, buffer.duration)
+        
+        // CREATE AN AUDIO NODE
+
+        const gainNode = this.audioCtx.createGain();
+        gainNode.gain.setValueAtTime(params_dict["Volume"], this.audioCtx.currentTime);
+        gainNode.connect(this.audioCtx.destination);
+
+        // !! AUDIO SOURCE NODE APPLIES PANNING AUTOMATICALLY !!
+        var sourceNode = this.audioCtx.createBufferSource();
+        sourceNode.buffer = buffer;
+        sourceNode.connect(gainNode);
+
+        sourceNode.start();
+        sourceNode.onended = () => {
+            sourceNode.stop();
+        }
+
+        // CREATE GRAIN
+
+        // const oscillator = this.audioCtx.createOscillator();
+        // oscillator.type = 'sine';
+        // oscillator.frequency.setValueAtTime(params_dict["Pitch"], this.audioCtx.currentTime);
+        
+        // const gainNode = this.audioCtx.createGain();
+        // gainNode.gain.setValueAtTime(params_dict["Volume"], this.audioCtx.currentTime);
+
+        // const envNode = this.audioCtx.createGain();
+        // envNode.gain.setValueAtTime(0.1, this.audioCtx.currentTime);
+        // envNode.gain.exponentialRampToValueAtTime(1.0, this.audioCtx.currentTime + params_dict["Attack"]);
+        // envNode.gain.exponentialRampToValueAtTime(0.9, this.audioCtx.currentTime + params_dict["Attack"] + params_dict["Sustain"]);
+        // envNode.gain.linearRampToValueAtTime(0, this.audioCtx.currentTime + params_dict["Attack"] + params_dict["Sustain"] + params_dict["Release"]);
+        
+        // oscillator.connect(envNode);
+        // envNode.connect(gainNode);
+        // gainNode.connect(this.audioCtx.destination);
+
+        // oscillator.start(this.audioCtx.currentTime);
+        // oscillator.stop(this.audioCtx.currentTime + params_dict["Attack"] + params_dict["Sustain"] + params_dict["Release"]);
+        
     }
 
     chromosomeChanged() {
@@ -248,7 +343,9 @@ export class Sonification {
     launchTimeCursor(id, duration) {
 
         var cursor_samples = 1000
-        var cursor_frequency = cursor_samples/duration
+        var cursor_sampleRate = cursor_samples/duration
+        var cursor_samplingPeriod = 1/cursor_sampleRate
+        console.log(cursor_sampleRate, cursor_samplingPeriod)
 
         var igv_column = document.querySelector(".igv-column")
         var timeCursor = document.createElement("div")
@@ -256,40 +353,20 @@ export class Sonification {
         timeCursor.setAttribute("id", `time-cursor-${id}`)
 
         igv_column.appendChild(timeCursor)
-
-        const waitFor = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         
-        async function moveCursor(cursor) {
-            for (var i = 0; i < cursor_samples; i++) {
-                var perc = i/cursor_samples * 100
-                cursor.style.left = `${perc}%`
-                await waitFor(1000/cursor_frequency);
-            }
-        }
-
         timeCursor.style.left = "0%"
-        moveCursor(timeCursor).then(() => {
-            console.log("Sonification finished")
-            timeCursor.remove()
-        })
-    }
-
-    playSonification(sonification) {
-
-        var name = sonification["name"]
-        var signals = sonification["signals"]
-        var start = sonification["locus"][0]
-        var end = sonification["locus"][1]
-        var duration = sonification["duration"]
-        var id = sonification["id"]
-        
-        var num_samples = Math.floor(end - start)
-        
-        this.launchTimeCursor()
-
-        if (this.audioCtx.state === 'suspended') {
-            this.audioCtx.resume();
+        for (var i = 0; i < cursor_samples; i++) {
+            moveCursor(i)
         }
+
+        function moveCursor(i) {
+            setTimeout(() => {
+                timeCursor.style.left = `${i/cursor_samples * 100}%`
+            }, i * cursor_samplingPeriod * 1000)
+        }
+
+        setTimeout(() => {timeCursor.remove()}, cursor_samples * cursor_samplingPeriod * 1000 + 10)
+
     }
 
     updateView() {
