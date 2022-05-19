@@ -1,6 +1,3 @@
-// const epigenome = require('../data/Binary/epigenome.json')
-// const available_sonifications = require('../data/Binary/available_sonifications.json')
-
 export class Sonification {
 
     constructor(browser, config) {
@@ -11,10 +8,12 @@ export class Sonification {
 
         this.chr = this.browser.referenceFrameList[0]['chr']
         
+        this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
         this.getSignals(this.epigenomes_url, this.chr).then(() => {
             this.loadTracks()
             this.getAvailableSonifications(this.available_sonifications_url).then(() => {
-                this.createView()
+                this.createView(this.audioCtx)
             })
         })
 
@@ -113,30 +112,37 @@ export class Sonification {
         leftContainer.classList.add("sonification-top-container");
         for(var i = 0; i < this.signals.length; i++) {
             var column = document.createElement("div");
-            column.classList.add("sonification-column");
+            column.classList.add("signal-box");
             leftContainer.appendChild(column);
 
             var label = document.createElement("div");
-            label.classList.add("sonification-label");
+            label.classList.add("signal-label");
             label.innerHTML = this.signals[i]["name"];
             column.appendChild(label);
 
             var checkbox = document.createElement("input");
             checkbox.type = "checkbox";
-            checkbox.classList.add("sonification-checkbox");
+            checkbox.classList.add("signal-checkbox");
             checkbox.id = this.signals[i]["name"];
             column.appendChild(checkbox);
         }
 
         rightContainer.classList.add("sonification-bottom-container");
         for(var j = 0; j < this.available_sonifications.length; j++) {
-            var btn = document.createElement("button");
+            
             var name = this.available_sonifications[j]["name"];
+            
+            var sonification_column = document.createElement("div")
+            sonification_column.classList.add("sonification-column")
+            sonification_column.setAttribute("id", `${name}-column`)
+            rightContainer.appendChild(sonification_column);
+
+            var btn = document.createElement("button")
             btn.classList.add("sonification-button");
             btn.setAttribute("id", `${name}-btn`);
             btn.innerHTML = name;
             btn.onclick = (e) => {
-                var checkboxes = document.getElementsByClassName("sonification-checkbox");
+                var checkboxes = document.getElementsByClassName("signal-checkbox");
                 var selected_signals = [];
                 for(var i = 0; i < checkboxes.length; i++) {
                     if(checkboxes[i].checked) {
@@ -155,8 +161,76 @@ export class Sonification {
                 this.sonificationID++;
                 this.playSonification(selected_sonification)
             };
-            rightContainer.appendChild(btn);
+            sonification_column.appendChild(btn)
+
+
+            var sonification_controller = document.createElement("div")
+            sonification_controller.classList.add("sonification-controller")
+            sonification_controller.setAttribute("id", `${name}-controller`)
+            this.createController(sonification_controller, name)
+            sonification_column.appendChild(sonification_controller)
+            
         }
+    }
+
+    sliderFactory(parentDiv, parent_name, slider_name, min, max, step, value) {
+        
+        var slider_container = document.createElement("div");
+        slider_container.classList.add("slider-container");
+        parentDiv.appendChild(slider_container);
+
+        var slider_label = document.createElement("label")
+        slider_label.classList.add("slider-label");
+        slider_label.setAttribute("id", `${parent_name}-${slider_name}-label`)
+        slider_label.innerHTML = `${slider_name}: ${value}`;
+        slider_container.appendChild(slider_label)
+    
+        var slider = document.createElement("input");
+        slider.type = "range";
+        slider.classList.add("sonification-slider");
+        slider.setAttribute("id", `${parent_name}-${slider_name}-slider`);
+        slider.min = min;
+        slider.max = max;
+        slider.step = step;
+        slider.value = value;
+
+        slider.oninput = (e) => {
+            slider_label.innerHTML = `${slider_name}: ${e.target.value}`;
+        }
+
+        slider_container.appendChild(slider);
+    }
+
+    createController(sonification_controller, name) {
+        
+        // RAW DATA SONIFICATION CONTROLLER
+        if(name === "Raw Data Sonification") {
+            var parent_name = "raw-data-sonification";
+            this.sliderFactory(sonification_controller, parent_name, "Volume", 0, 10, 0.5, 5);
+            this.sliderFactory(sonification_controller, parent_name, "Frequency", 50, 500, 1, 250)
+            this.sliderFactory(sonification_controller, parent_name, "Duration", 1, 30, 1, 15)
+        }
+    }
+    
+    rawDataSonification(time) {
+        const oscillator = this.audioCtx.createOscillator();
+        oscillator.type = 'square';
+        oscillator.frequency.setValueAtTime(440, this.audioCtx.currentTime);
+        oscillator.connect(this.audioCtx.destination);
+        oscillator.start(time);
+        oscillator.stop(time + 1);
+
+        let attackTime = 0.2;
+        const attackControl = document.querySelector('#attack');
+        attackControl.addEventListener('input', function() {
+            attackTime = Number(this.value);
+        }, false);
+
+        let releaseTime = 0.5;
+        const releaseControl = document.querySelector('#release');
+        releaseControl.addEventListener('input', function() {
+            releaseTime = Number(this.value);
+        }, false);
     }
 
     chromosomeChanged() {
@@ -171,16 +245,8 @@ export class Sonification {
         })
     }
 
-    playSonification(sonification) {
+    launchTimeCursor(id, duration) {
 
-        var name = sonification["name"]
-        var signals = sonification["signals"]
-        var start = sonification["locus"][0]
-        var end = sonification["locus"][1]
-        var duration = sonification["duration"]
-        var id = sonification["id"]
-        
-        var num_samples = Math.floor(end - start)
         var cursor_samples = 1000
         var cursor_frequency = cursor_samples/duration
 
@@ -208,21 +274,28 @@ export class Sonification {
         })
     }
 
+    playSonification(sonification) {
+
+        var name = sonification["name"]
+        var signals = sonification["signals"]
+        var start = sonification["locus"][0]
+        var end = sonification["locus"][1]
+        var duration = sonification["duration"]
+        var id = sonification["id"]
+        
+        var num_samples = Math.floor(end - start)
+        
+        this.launchTimeCursor()
+
+        if (this.audioCtx.state === 'suspended') {
+            this.audioCtx.resume();
+        }
+    }
+
     updateView() {
         if(this.signals) {
             console.log(this.chr, this.signals.length)
         }
     }
 
-    // callPython(btn) {
-    //     console.log(btn.innerHTML)
-    //     $.ajax({
-    //     // POST è una CORS, per cui non è necessario specificare l'header Access-Control-Allow-Origin
-    //     type: "POST",
-    //     url: "../../python/test.py/test",
-    //     context: document.body,
-    //     }).done(() => {
-    //     console.log("Success");
-    //     });
-    // }
 }
