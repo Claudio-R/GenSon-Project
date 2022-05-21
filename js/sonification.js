@@ -1,3 +1,5 @@
+import RawDataSonification from './audioProcessors/RawDataSonification.js';
+
 export class Sonification {
 
     constructor(browser, config) {
@@ -18,6 +20,11 @@ export class Sonification {
         })
 
         this.sonificationID = 0;
+
+        /** Store all the processors in a dictionary */
+        // this.audioProcessors = {}
+        // this.createAudioProcessor('RawDataSonification','raw-data-sonification')
+
     }
 
     /** Collect binary epigenomic data from epigenome.json */
@@ -152,7 +159,7 @@ export class Sonification {
                     }
                 }
                 var selected_btn = e.target
-                var selected_sonification = {
+                var sonificationConfig = {
                     "type": selected_btn.innerHTML,
                     "formatted_name": selected_btn.id.slice(0, -4),
                     "signals": selected_signals,
@@ -162,8 +169,9 @@ export class Sonification {
                 }
                 //console.log(selected_sonification)
                 this.sonificationID++;
-                this.playSonification(selected_sonification)
+                this.configureSonification(sonificationConfig)
             };
+
             sonification_column.appendChild(btn)
 
             var sonification_controller = document.createElement("div")
@@ -215,7 +223,23 @@ export class Sonification {
         slider_container.appendChild(slider);
     }
 
-    playSonification(sonification) {
+    // async createAudioProcessor(name, formatted_name) {   
+    //     if (!this.audioCtx) {
+    //       try {
+    //         this.audioCtx = new AudioContext();
+    //         await this.audioCtx.resume().then(() => {
+    //             console.log("Audio context resumed")}
+    //         );
+    //         await this.audioCtx.audioWorklet.addModule(`./audioProcessors/${name}.js`).then(() => {
+    //             this.audioProcessors[formatted_name] = new AudioWorkletNode(this.audioCtx, `${formatted_name}-processor`);
+    //         });                    
+    //       } catch(e) {
+    //         console.log(e);
+    //       }
+    //     }      
+    // }
+
+    configureSonification(sonification) {
 
         // REQUIRED SONIFICATION
         var type = sonification["type"]
@@ -231,101 +255,89 @@ export class Sonification {
             return
         }
         
-        // RETRIEVE CONTROL PARAMETERS
-
+        // RETRIEVE CURRENT CONTROL PARAMETERS FROM UI
         var params_dict = {}
         for (let param of params) {
-            var slider_name = param["name"]
-            var slider = document.getElementById(`${name}-${slider_name}-slider`)
+            var param_name = param["name"]
+            var slider = document.getElementById(`${name}-${param_name}-slider`)
             var value = Number(slider.value)
-            params_dict[slider_name] = value        
+            params_dict[param_name] = value        
         }
 
-        //console.log(params_dict)
-
         // RETRIEVE AND TRIM THE SIGNALS TO SONIFY
-        var signal_data = []
+        var signals_toProcess = []
         for(let signal of signals) {
             for(var i = 0; i < this.signals.length; i++) {
                 if(this.signals[i]["name"] === signal) {
-                    console.log(this.signals[i]["binary_data"])
+                    //console.log(this.signals[i]["binary_data"])
                     var trimmed_signal = this.signals[i]["binary_data"].slice(Math.floor(start), Math.floor(end))
-                    console.log(start, end)
-                    signal_data.push(trimmed_signal)
+                    //console.log(start, end)
+                    signals_toProcess.push(trimmed_signal)
                 }
             }
         }
 
-        var duration = 15;
-        this.launchTimeCursor(id, duration)
-        //console.log(signal_data)
-        this.playRawData(signal_data, params_dict, id, duration)
+        var sonificationDuration = 15;
+        this.play(name, id, signals_toProcess, params_dict, sonificationDuration)
     }
 
-    playRawData(signals, params_dict, id, duration) {
-
+    /**
+     * The General idea is to load the data to process into a buffer and feed the proper audio processor
+     * @param {*} name sonification formatted name
+     * @param {*} signal_toProcess multi-dimensional array of data to process
+     * @param {*} params_dict dictionary of control parameters
+     * @param {*} duration duration of the overall sonification
+     */
+    async play(name, id, signals_toProcess, params_dict, duration) {
+        
         // RESUME THE AUDIO CONTEXT
         if (this.audioCtx.state === 'suspended') {
             this.audioCtx.resume();
         }
 
-        // CREATE BUFFERS
-        var num_channels = signals.length;
-        var buffer_length = signals[0].length;
-        
-        // var buffer_sampleRate = Math.max(8000, buffer_length/params_dict["Duration"]);
+        // CREATE THE PROCESSOR
+        // var processor = this.audioProcessors[name];
+        // if (!processor) {
+        //     processor = this.createAudioProcessor(name);
+        //     this.audioProcessors[name] = processor;
+        // }
 
-        var buffer_sampleRate = Math.max(8000, buffer_length/duration);
-
+         // CREATE MULTI CHANNEL BUFFER
+        var num_channels = signals_toProcess.length;
+        var buffer_length = signals_toProcess[0].length;
+        var multiChannelInputbuffer = this.audioCtx.createBuffer(num_channels, buffer_length, this.audioCtx.sampleRate);
         
-        var buffer = this.audioCtx.createBuffer(num_channels, buffer_length, buffer_sampleRate);
+        // LOAD THE DATA INTO THE BUFFER
         for(var i = 0; i < num_channels; i++) {
-            var channel = buffer.getChannelData(i);
+            var channel = multiChannelInputbuffer.getChannelData(i);
             for(var j = 0; j < buffer_length; j++) {
-                channel[j] = signals[i][j]
+                channel[j] = signals_toProcess[i][j]
             }
         }
         
-        console.log(buffer_sampleRate, buffer_length, num_channels, buffer.duration)
+        // INSTANTIATE THE SONIFICATION PROCESSOR
         
-        // CREATE AN AUDIO NODE
-
-        const gainNode = this.audioCtx.createGain();
-        gainNode.gain.setValueAtTime(params_dict["Volume"], this.audioCtx.currentTime);
-        gainNode.connect(this.audioCtx.destination);
-
-        // !! AUDIO SOURCE NODE APPLIES PANNING AUTOMATICALLY !!
-        var sourceNode = this.audioCtx.createBufferSource();
-        sourceNode.buffer = buffer;
-        sourceNode.connect(gainNode);
-
-        sourceNode.start();
-        sourceNode.onended = () => {
-            sourceNode.stop();
-        }
-
-        // CREATE GRAIN
-
-        // const oscillator = this.audioCtx.createOscillator();
-        // oscillator.type = 'sine';
-        // oscillator.frequency.setValueAtTime(params_dict["Pitch"], this.audioCtx.currentTime);
+        console.log(multiChannelInputbuffer.numberOfChannels, params_dict)
         
-        // const gainNode = this.audioCtx.createGain();
-        // gainNode.gain.setValueAtTime(params_dict["Volume"], this.audioCtx.currentTime);
-
-        // const envNode = this.audioCtx.createGain();
-        // envNode.gain.setValueAtTime(0.1, this.audioCtx.currentTime);
-        // envNode.gain.exponentialRampToValueAtTime(1.0, this.audioCtx.currentTime + params_dict["Attack"]);
-        // envNode.gain.exponentialRampToValueAtTime(0.9, this.audioCtx.currentTime + params_dict["Attack"] + params_dict["Sustain"]);
-        // envNode.gain.linearRampToValueAtTime(0, this.audioCtx.currentTime + params_dict["Attack"] + params_dict["Sustain"] + params_dict["Release"]);
+        const sonificationProcessor = new RawDataSonification(multiChannelInputbuffer.numberOfChannels, params_dict);
+        // await sonificationProcessor.process(this.audioCtx, multiChannelInputbuffer, params_dict).then((multiChannelOutPutbuffer) => {
+        //     console.log("Processed")
+        //     console.log("numChannels: ", multiChannelOutPutbuffer.length, "\nbufferLength: ", multiChannelOutPutbuffer.getChannelData(0).length)
+        //     this.launchTimeCursor(id, duration)
+        // });
         
-        // oscillator.connect(envNode);
-        // envNode.connect(gainNode);
-        // gainNode.connect(this.audioCtx.destination);
+        // // CREATE THE SOURCE NODE AND CONNECT IT TO THE PROCESSOR
+        // // !! AUDIO SOURCE NODE APPLIES PANNING AUTOMATICALLY !!
+        // var sourceNode = this.audioCtx.createBufferSource();
+        // sourceNode.buffer = buffer;
+        // sourceNode.connect(processor);
+        // processor.connect(this.audioCtx.destination);
 
-        // oscillator.start(this.audioCtx.currentTime);
-        // oscillator.stop(this.audioCtx.currentTime + params_dict["Attack"] + params_dict["Sustain"] + params_dict["Release"]);
-        
+        // // START THE SOURCE NODE
+        // sourceNode.start();
+        // sourceNode.onended = () => {
+        //     sourceNode.stop();
+        // }
     }
 
     chromosomeChanged() {
@@ -355,9 +367,11 @@ export class Sonification {
         igv_column.appendChild(timeCursor)
         
         timeCursor.style.left = "0%"
-        for (var i = 0; i < cursor_samples; i++) {
-            moveCursor(i)
-        }
+        setTimeout(() => {
+            for (var i = 0; i < cursor_samples; i++) {
+                moveCursor(i)
+            }
+        }, 1000) // delay to allow the igv to render the first frame
 
         function moveCursor(i) {
             setTimeout(() => {
