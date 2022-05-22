@@ -100,6 +100,7 @@ export class Sonification {
         this.$sonification_container.classList.add("sonification-container");
 
         this.$igv_div = document.getElementById("igv-main");
+        // this.$igv_div = document.querySelector(".row");
         this.$igv_div.appendChild(this.$sonification_container);
         this.$igv_div.addEventListener('change', (e) => { 
             if(e.target.getAttribute("name") === "chromosome-select-widget") {
@@ -131,20 +132,32 @@ export class Sonification {
         }
 
         bottomContainer.classList.add("sonification-bottom-container");
-            
+        
+        let leftContainer = document.createElement("div");
+        leftContainer.classList.add("sonification-left-container");
+
+        let rightContainer = document.createElement("div");
+        rightContainer.classList.add("sonification-right-container");
+
+        bottomContainer.appendChild(leftContainer);
+        bottomContainer.appendChild(rightContainer);
+
         for(let sonification of this.available_sonifications) {
 
             var type = sonification["type"]
-            var name = sonification["formatted_name"];
+            var formatted_name = sonification["formatted_name"];
 
             var sonification_column = document.createElement("div")
             sonification_column.classList.add("sonification-column")
-            sonification_column.setAttribute("id", `${name}-column`)
-            bottomContainer.appendChild(sonification_column);
+            sonification_column.setAttribute("id", `${formatted_name}-column`)
+            leftContainer.appendChild(sonification_column);
 
             var btn = document.createElement("button")
             btn.classList.add("sonification-button");
-            btn.setAttribute("id", `${name}-btn`);
+            btn.setAttribute("id", `${formatted_name}-btn`);
+            if(formatted_name != "raw-data-sonification") {
+                btn.setAttribute("disabled", "disabled");
+            }
             btn.innerHTML = type;
             btn.onclick = (e) => {
                 var checkboxes = document.getElementsByClassName("signal-checkbox");
@@ -168,16 +181,33 @@ export class Sonification {
 
             var sonification_controller = document.createElement("div")
             sonification_controller.classList.add("sonification-controller")
-            sonification_controller.setAttribute("id", `${name}-controller`)
-            this.createController(sonification_controller, name, sonification["init_params"])
+            sonification_controller.setAttribute("id", `${formatted_name}-controller`)
+            this.createController(sonification_controller, formatted_name, sonification["init_params"])
             sonification_column.appendChild(sonification_controller)
             
         }
+
+        var outputWindow = document.createElement("div");
+        outputWindow.classList.add("output-window");
+        rightContainer.appendChild(outputWindow);
+
+        var outputWindowTitle = document.createElement("div");
+        outputWindowTitle.classList.add("output-window-title");
+        outputWindowTitle.innerHTML = "POST WINDOW";
+        outputWindow.appendChild(outputWindowTitle);
+
+        var outputWindowContent = document.createElement("div");
+        outputWindowContent.classList.add("output-window-content");
+        outputWindow.appendChild(outputWindowContent);
+        this.outputWindow = outputWindowContent;
+
+        this.outputWindow.innerHTML = "SYSTEM BOOTED<br/>SonicIGV is ready to sonify!";
+
     }
 
-    createController(sonification_controller, sonification_name, params) {
+    createController(sonification_controller, formatted_name, params) {
         
-        function sliderFactory(parentDiv, parent_name, config) {
+        function sliderFactory(parentDiv, formatted_name, config) {
 
             var slider_name = config["name"]
             var min = config["min"]
@@ -191,14 +221,14 @@ export class Sonification {
     
             var slider_label = document.createElement("label")
             slider_label.classList.add("slider-label");
-            slider_label.setAttribute("id", `${parent_name}-${slider_name}-label`)
+            slider_label.setAttribute("id", `${formatted_name}-${slider_name}-label`)
             slider_label.innerHTML = `${slider_name}: ${value}`;
             slider_container.appendChild(slider_label)
         
             var slider = document.createElement("input");
             slider.type = "range";
             slider.classList.add("sonification-slider");
-            slider.setAttribute("id", `${parent_name}-${slider_name}-slider`);
+            slider.setAttribute("id", `${formatted_name}-${slider_name}-slider`);
             slider.min = min;
             slider.max = max;
             slider.step = step;
@@ -207,12 +237,16 @@ export class Sonification {
             slider.oninput = (e) => {
                 slider_label.innerHTML = `${slider_name}: ${e.target.value}`;
             }
-    
+            
+            if(formatted_name != "raw-data-sonification") {
+                slider.setAttribute("disabled", "disabled");
+            }
+
             slider_container.appendChild(slider);
         }
         
         for(let param of params) {
-            sliderFactory(sonification_controller, sonification_name, param);
+            sliderFactory(sonification_controller, formatted_name, param);
         }
     }
 
@@ -221,12 +255,13 @@ export class Sonification {
         // REQUIRED SONIFICATION
         var formatted_name = sonification["formatted_name"];
         var signals_names = sonification["signals_names"]
-        var start = sonification["locus"][0];
-        var end = sonification["locus"][1];
+        var start = sonification["locus"][0] / 1000;
+        var end = sonification["locus"][1] / 1000;
         var params = sonification["params"]
 
         if(signals_names.length === 0) {
-            console.log("No signals to play")
+            //console.log("No signals to play")
+            this.outputWindow.innerHTML = "No signals to play";
             return
         }
         
@@ -244,7 +279,10 @@ export class Sonification {
         // CHECK IF THE SONIFICATION IS CACHED
         if(this.sonificationIsCached(formatted_name, signals_names, params_dict, sonification["locus"], sonificationDuration)) {
             // PLAY THE CACHED DATA
-            console.log("Playing cached data")
+            //console.log("Playing cached data")
+            
+            this.outputWindow.innerHTML = "RAW DATA SONIFICATION<br/>Playing Cached Data...";
+
             this.cache[formatted_name]["processor"].play();
             return;
         }

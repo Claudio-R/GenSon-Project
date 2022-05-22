@@ -7,26 +7,31 @@ class RawDataSonification {
      */
     constructor(multiChannelInputBuffer, parameters) {
         
+        this.outputWindow = document.querySelector('.output-window-content');
+        this.outputWindow.innerHTML = "RAW DATA SONIFICATION<br/>";
+        
         this.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
 
         // THE FOLLOWING ARE ALL ASYNCHRONOUS OPERATIONS IN ORDER NOT TO BLOCKE THE UI
         const numChannels = multiChannelInputBuffer.numberOfChannels;
 
         // 1. SYNTHETIZE THE GRAINS (CREATE OSCILLATORS AND ENV NODES) !NO DETUNE FOR NOW!
+        this.outputWindow.innerHTML += "Generating Grains...";
         this.createGrains(numChannels, parameters).then((config) => {
         
             // 2. RENDER THE GRAINS ON A SINGLE CHANNEL BUFFER
             this.renderGrains(config).then((renderedBuffer) => {         
-                // this.listenTo(renderedBuffer);
                 
                 // 3. SPLIT THE GRAINS INTO MULTI CHANNEL BUFFERS
+                //this.outputWindow.innerHTML += "<br/>Collecting signals...";
                 this.getMultiChannelGrainBuffer(renderedBuffer, numChannels, parameters).then((multiChannelGrainBuffer) => {
                     this.multiChannelGrainBuffer = multiChannelGrainBuffer;
-                    // this.listenTo(multiChannelGrainBuffer);
 
                     // 4. PROCESS THE FINAL SONIFICATION
+                    // this.outputWindow.innerHTML += "<br/>Final processing has started...";
                     this.process(multiChannelInputBuffer).then((multiChannelOutputBuffer) => {
                         console.log(multiChannelOutputBuffer);
+    
                         this.play(multiChannelOutputBuffer);
                         this.sonifiedSignals = multiChannelOutputBuffer;
                     });
@@ -53,7 +58,9 @@ class RawDataSonification {
                 var oscillator = offlineCtx.createOscillator();
                 var frequency = parameters.Frequency * (i + 1) + Math.random() * parameters.Detune * parameters.Frequency
                 oscillator.frequency.value = frequency;
-                console.log("FREQUENCY: " + frequency);
+                
+                this.outputWindow.innerHTML += "<br/>Grain " + i + ": FREQUENCY: " + frequency;
+                
                 oscillator.type = 'sine';
 
                 var gainNode = offlineCtx.createGain();
@@ -163,12 +170,15 @@ class RawDataSonification {
             
             const outputBufferLength = Math.max(N_ar, N_data)
 
-            console.log("N_ar: " + N_ar + " N_data: " + N_data + " outputBufferLength: " + outputBufferLength);
+            //console.log("N_ar: " + N_ar + " N_data: " + N_data + " outputBufferLength: " + outputBufferLength);
 
             const multiChannelOutputBuffer = audioContext.createBuffer(multiChannelInputBuffer.numberOfChannels, outputBufferLength, audioContext.sampleRate);
                         
             for(let channelNum = 0; channelNum < multiChannelInputBuffer.numberOfChannels; channelNum++) {
                 console.log("Processing signal " + (channelNum + 1) + " of " + multiChannelInputBuffer.numberOfChannels);
+                
+                //this.outputWindow.innerHTML += "<br/>Processing signal " + (channelNum + 1) + " of " + multiChannelInputBuffer.numberOfChannels;
+
                 let channelBuffer = multiChannelInputBuffer.getChannelData(channelNum);
                 let grainBuffer = this.multiChannelGrainBuffer.getChannelData(channelNum);
                 let outputBuffer = multiChannelOutputBuffer.getChannelData(channelNum);
@@ -188,7 +198,9 @@ class RawDataSonification {
                 }
             }
 
-            console.log("Sonification completed");
+            //console.log("Sonification completed");
+
+            this.outputWindow.innerHTML += "<br/>Sonification Completed!";
             resolve(multiChannelOutputBuffer);
 
         });
